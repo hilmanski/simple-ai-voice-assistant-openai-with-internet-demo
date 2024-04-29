@@ -8,7 +8,7 @@ A voice assistant demo using OpenAI assistant + connect to tthe internet using f
 - Blog post explanation for the basic: [Build an AI Voice assistant like Siri using OpenAI](https://serpapi.com/blog/build-ai-voice-assistant-like-siri-use-openai-ai-assistant/)
 - Blog post for this repo: [+ Connect the AI voice with Google - to get real time data](https://serpapi.com/blog/build-a-smart-ai-voice-assistant-connect-to-the-internet)
 
-> Wathchout, make sure to choose a model that support function calling. Ref: https://platform.openai.com/docs/guides/function-calling
+> Wathchout, make sure to choose a model that support multiple function callings. Ref: https://platform.openai.com/docs/guides/function-calling
 
 ## Disclaimer
 
