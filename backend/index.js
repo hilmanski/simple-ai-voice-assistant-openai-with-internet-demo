@@ -3,7 +3,10 @@ const cors = require('cors')
 
 require("dotenv").config();
 const OpenAI = require('openai');
-const { OPENAI_API_KEY, ASSISTANT_ID } = process.env;
+const { OPENAI_API_KEY, ASSISTANT_ID, SERPAPI_KEY } = process.env;
+
+// Addition for function calling
+const { getJson } = require("serpapi");
 
 // Setup Express
 const app = express();
@@ -18,6 +21,20 @@ const openai = new OpenAI({
 // Assistant can be created via API or UI
 const assistantId = ASSISTANT_ID
 let pollingInterval
+
+
+// Addition for function calling: 3rd party API calls
+async function getSearchResult(query) {
+    console.log('------- CALLING AN EXTERNAL API ----------')
+    const json = await getJson({
+        engine: "google",
+        api_key: SERPAPI_KEY,
+        q: query,
+        location: "Austin, Texas",
+    });
+
+    return json['answer_box'] ;
+}
 
 // ========================
 // OpenAI assistant section
@@ -44,15 +61,13 @@ async function addMessage(threadId, message) {
 
 async function runAssistant(threadId) {
     console.log('Running assistant for thread: ' + threadId)
-    const response = await openai.beta.threads.runs.create(
+    const response = await openai.beta.threads.runs.createAndPoll(
         threadId,
         { 
           assistant_id: assistantId
           // Make sure to not overwrite the original instruction, unless you want to
         }
       );
-
-    console.log(response)
 
     return response;
 }
@@ -64,8 +79,7 @@ async function checkingStatus(res, threadId, runId) {
     );
 
     const status = runObject.status;
-    console.log(runObject)
-    console.log('Current status: ' + status);
+    console.log('> Current status: ' + status);
     
     if(status == 'completed') {
         clearInterval(pollingInterval);
@@ -74,6 +88,40 @@ async function checkingStatus(res, threadId, runId) {
         const lastMessage = messagesList.body.data[0].content[0].text.value
 
         res.json({ message: lastMessage });
+
+    } else if(status == 'queued' || status == 'in_progress') {
+        console.log('Still in progress or queued ... ')
+        await new Promise(r => setTimeout(r, 2000)); // wait 2 seconds
+        checkingStatus(res, threadId, runId)
+    } else if(status === 'requires_action') {
+        if(runObject.required_action.type === 'submit_tool_outputs') {
+            console.log('submit tool outputs ... ')
+            const tool_calls = await runObject.required_action.submit_tool_outputs.tool_calls
+
+            // We can call for a function simultaneously, by adding them in one array
+            let toolOutputs = []
+            for(const toolCall of tool_calls) {
+                const parsedArgs = JSON.parse(toolCall.function.arguments);
+                const apiResponse = await getSearchResult(parsedArgs.query)
+                console.log('Query for 3rd API: ' + parsedArgs.query)
+
+                toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output: JSON.stringify(apiResponse)
+                })
+            }
+
+            openai.beta.threads.runs.submitToolOutputs(
+                threadId,
+                runId,
+                {
+                    tool_outputs: toolOutputs
+                }
+            )
+
+            await new Promise(r => setTimeout(r, 2000)); // wait 2 seconds
+            checkingStatus(res, threadId, runId)
+        }
     }
 }
 
@@ -94,16 +142,9 @@ app.get('/thread', (req, res) => {
 app.post('/message', async (req, res) => {
     const { message, threadId } = req.body;
     addMessage(threadId, message).then(message => {
-        // res.json({ messageId: message.id });
-
-        // Run the assistant
         runAssistant(threadId).then(run => {
-            const runId = run.id;           
-            
-            // Check the status
-            pollingInterval = setInterval(() => {
-                checkingStatus(res, threadId, runId);
-            }, 500);
+            const runId = run.id;       
+            checkingStatus(res, threadId, runId);
         });
     });
 });
